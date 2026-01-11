@@ -1,5 +1,46 @@
-ARG POSTGRES_VERSION=17
-FROM postgres:${POSTGRES_VERSION}
+FROM postgres:17
+
+RUN apt-get update && apt-get install -y lsb-release wget gnupg curl ca-certificates unzip
+
+# Add PostgreSQL APT repository
+RUN install -d /usr/share/postgresql-common/pgdg
+RUN curl -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc --fail https://www.postgresql.org/media/keys/ACCC4CF8.asc
+RUN . /etc/os-release && \
+    echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $VERSION_CODENAME-pgdg main" > /etc/apt/sources.list.d/pgdg.list
+
+# Add TimescaleDB APT repository
+RUN echo "deb https://packagecloud.io/timescale/timescaledb/debian/ $(lsb_release -c -s) main" > /etc/apt/sources.list.d/timescaledb.list
+RUN wget --quiet -O - https://packagecloud.io/timescale/timescaledb/gpgkey | gpg --dearmor -o /etc/apt/trusted.gpg.d/timescaledb.gpg
+
+# Install pg_textsearch from pre-built binary
+RUN wget -q https://github.com/timescale/pg_textsearch/releases/download/v0.1.0/pg-textsearch-v0.1.0-pg17-amd64.zip -O /tmp/pg_textsearch.zip && \
+    unzip -o /tmp/pg_textsearch.zip -d /tmp/pg_textsearch && \
+    dpkg -i /tmp/pg_textsearch/*.deb && \
+    rm -rf /tmp/pg_textsearch.zip /tmp/pg_textsearch
+
+# Update package lists and install extensions
+RUN apt-get update && apt-get install -y \
+    postgresql-17-pgvector \
+    timescaledb-2-postgresql-17 \
+    postgresql-server-dev-17 \
+    build-essential \
+    git \
+    pkg-config \
+    libssl-dev \
+    libclang-dev \
+    clang
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+RUN /root/.cargo/bin/cargo install --locked cargo-pgrx --version 0.16.1
+
+RUN /root/.cargo/bin/cargo pgrx init --pg17 /usr/bin/pg_config
+
+RUN git clone --depth 1 https://github.com/timescale/pgvectorscale.git /tmp/pgvectorscale && \
+    cd /tmp/pgvectorscale/pgvectorscale && \
+    /root/.cargo/bin/cargo pgrx install --release && \
+    rm -rf /tmp/pgvectorscale
 
 # Install OpenSSL and sudo
 RUN apt-get update && apt-get install -y openssl sudo
